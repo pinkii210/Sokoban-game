@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Sokoban – Đẩy thùng gỗ</title>
+<style>
+  :root{
+    --bg:#0f1220; --panel:#171a2b; --text:#e9ecf1; --accent:#6ee7ff; --accent2:#a78bfa;
+    --wall:#2b2f45; --floor:#1b1f33; --goal:#233a2e; --box:#b57f37; --boxGoal:#9cd67c; --player:#ffd166;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0d1020,#0a0d18);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;color:var(--text);display:flex;min-height:100vh;align-items:center;justify-content:center;padding:16px}
+  .wrap{width:min(900px,96vw)}
+  header{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:12px}
+  h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.3px}
+  .controls{background:var(--panel);border:1px solid #22253e;border-radius:12px;padding:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  button,select{
+    background:#20243d;border:1px solid #2b2f52;color:var(--text);padding:8px 12px;border-radius:10px;
+    font-weight:600;cursor:pointer;transition:.15s;box-shadow:0 0 0 0 rgba(0,0,0,0);
+  }
+  button:hover,select:hover{transform:translateY(-1px)}
+  button:active{transform:translateY(0)}
+  .badge{padding:6px 10px;border-radius:999px;background:#1a1d33;border:1px solid #282b48;font-weight:700}
+  #board{aspect-ratio:1/1;width:min(96vw,900px);background:#111528;border:1px solid #22253e;border-radius:16px;padding:12px;display:grid;gap:4px;place-items:center}
+  .cell{width:100%;height:100%;border-radius:8px;display:grid;place-items:center;font-size:clamp(12px,3.3vw,26px);user-select:none}
+  .wall{background:var(--wall)}
+  .floor{background:var(--floor)}
+  .goal{background:linear-gradient(135deg,#244533, var(--goal))}
+  .box{background:linear-gradient(135deg,#c0924a,var(--box));box-shadow:inset 0 2px 0 #dca559}
+  .box.goal{background:linear-gradient(135deg,#b5e39a,var(--boxGoal));box-shadow:inset 0 2px 0 #d3f2b7}
+  .player{background:radial-gradient(circle at 40% 35%,#ffe79c,var(--player));outline:2px solid #e7b94a}
+  .player.goal{outline-color:#8de19a}
+  .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:14px;opacity:.9}
+  .legend .chip{display:flex;gap:6px;align-items:center}
+  .chip .swatch{width:16px;height:16px;border-radius:4px;border:1px solid #2e3358}
+  /* Mobile controls */
+  .pad{margin-top:10px;display:grid;grid-template-columns:repeat(3,64px);grid-template-rows:repeat(3,64px);gap:8px;justify-content:center}
+  .pad button{font-size:18px}
+  .pad button.invisible{visibility:hidden}
+  @media (min-width:700px){ .pad{display:none} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🧱 Sokoban – Đẩy thùng gỗ</h1>
+    <span id="status" class="badge">Bước: 0 • Màn: 1</span>
+  </header>
+
+  <div class="controls">
+    <label>Chọn màn:
+      <select id="levelSelect"></select>
+    </label>
+    <button id="resetBtn">Reset (R)</button>
+    <button id="undoBtn">Undo (Z/U)</button>
+    <button id="prevBtn">⟨ Màn trước</button>
+    <button id="nextBtn">Màn sau ⟩</button>
+    <span style="margin-left:auto;opacity:.8">Di chuyển: ← ↑ → ↓ / W A S D</span>
+  </div>
+
+  <div id="board" aria-label="Sokoban board"></div>
+
+  <div class="legend">
+    <div class="chip"><span class="swatch" style="background:var(--wall)"></span> Tường</div>
+    <div class="chip"><span class="swatch" style="background:var(--floor)"></span> Sàn</div>
+    <div class="chip"><span class="swatch" style="background:var(--goal)"></span> Đích</div>
+    <div class="chip"><span class="swatch" style="background:linear-gradient(135deg,#c0924a,var(--box))"></span> Thùng</div>
+    <div class="chip"><span class="swatch" style="background:linear-gradient(135deg,#b5e39a,var(--boxGoal))"></span> Thùng đúng chỗ</div>
+    <div class="chip"><span class="swatch" style="background:radial-gradient(circle at 40% 35%,#ffe79c,var(--player));border:1px solid #e7b94a"></span> Người chơi</div>
+  </div>
+
+  <!-- Mobile D-pad -->
+  <div class="pad">
+    <button class="invisible"></button>
+    <button data-dir="up">↑</button>
+    <button class="invisible"></button>
+    <button data-dir="left">←</button>
+    <button data-dir="down">↓</button>
+    <button data-dir="right">→</button>
+    <button class="invisible"></button>
+    <button id="padUndo">Undo</button>
+    <button id="padReset">Reset</button>
+  </div>
+</div>
+
+<script>
+/* -------- Levels (classic Sokoban notation) --------
+   #: wall, ' ': floor, .: goal, @: player, $: box, *: box on goal, +: player on goal
+*/
+const LEVELS = [
+`#######
+#.@ $ #
+#  $$ #
+# . . #
+#     #
+#######`,
+`########
+#  .   #
+#  $   #
+#  $   #
+# ..  @#
+#   ####
+#   #
+#####
+`,
+`  #####
+###   #
+#  $  #
+# #$# #
+# . . #
+#  @  #
+#######`,
+`########
+#   .  #
+#  $$  #
+#  ##  #
+#  @   #
+#   .  #
+#   $  #
+########`,
+`#########
+#   .   #
+# $$$$$ #
+#   @   #
+#   .   #
+#       #
+#########`
+];
+
+// Parse level text to grid
+function parseLevel(text){
+  const rows = text.replace(/\r/g,'').split('\n').filter(r=>r.length>0);
+  const width = Math.max(...rows.map(r=>r.length));
+  const grid = rows.map(r => r.padEnd(width,' ').split(''));
+  return {grid,width,height:grid.length};
+}
+
+let levelIndex = 0;
+let state = null; // {grid, width, height, player:{r,c}, moves, history:[]}
+const boardEl = document.getElementById('board');
+const statusEl = document.getElementById('status');
+const levelSelect = document.getElementById('levelSelect');
+
+// Build level select
+LEVELS.forEach((_,i)=>{
+  const opt = document.createElement('option');
+  opt.value = i; opt.textContent = `Màn ${i+1}`;
+  levelSelect.appendChild(opt);
+});
+levelSelect.addEventListener('change', e => loadLevel(+e.target.value));
+
+document.getElementById('resetBtn').onclick = ()=> loadLevel(levelIndex);
+document.getElementById('undoBtn').onclick  = ()=> undo();
+document.getElementById('prevBtn').onclick  = ()=> loadLevel((levelIndex-1+LEVELS.length)%LEVELS.length);
+document.getElementById('nextBtn').onclick  = ()=> loadLevel((levelIndex+1)%LEVELS.length);
+
+// Mobile pad
+document.querySelectorAll('.pad [data-dir]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const dir = btn.getAttribute('data-dir');
+    const map = {up:[-1,0],down:[1,0],left:[0,-1],right:[0,1]};
+    move(...map[dir]);
+  });
+});
+document.getElementById('padUndo').onclick = ()=>undo();
+document.getElementById('padReset').onclick = ()=>loadLevel(levelIndex);
+
+// Helpers to read/write cells
+function getCell(r,c){
+  if(r<0||c<0||r>=state.height||c>=state.width) return '#';
+  return state.grid[r][c];
+}
+function setCell(r,c,val){ state.grid[r][c]=val; }
+
+// Find player
+function findPlayer(){
+  for(let r=0;r<state.height;r++){
+    for(let c=0;c<state.width;c++){
+      const ch = state.grid[r][c];
+      if(ch==='@'||ch==='+') return {r,c};
+    }
+  }
+  return null;
+}
+
+// Render grid
+function render(){
+  boardEl.style.gridTemplateColumns = `repeat(${state.width}, 1fr)`;
+  boardEl.style.gridTemplateRows = `repeat(${state.height}, 1fr)`;
+  boardEl.innerHTML = '';
+  for(let r=0;r<state.height;r++){
+    for(let c=0;c<state.width;c++){
+      const ch = state.grid[r][c];
+      const div = document.createElement('div');
+      div.className = 'cell ' + classFor(ch);
+      boardEl.appendChild(div);
+    }
+  }
+  statusEl.textContent = `Bước: ${state.moves} • Màn: ${levelIndex+1}`;
+}
+
+function classFor(ch){
+  switch(ch){
+    case '#': return 'wall';
+    case ' ': return 'floor';
+    case '.': return 'goal';
+    case '$': return 'box';
+    case '*': return 'box goal';
+    case '@': return 'player';
+    case '+': return 'player goal';
+    default: return 'floor';
+  }
+}
+
+// Movement logic
+function move(dr,dc){
+  const p = state.player;
+  const r1=p.r+dr, c1=p.c+dc;           // next cell
+  const r2=p.r+2*dr, c2=p.c+2*dc;       // cell after next (for pushing)
+  const t1 = getCell(r1,c1);
+  if(t1==='#') return; // wall
+
+  // If box in front
+  if(t1==='$' || t1==='*'){
+    const t2 = getCell(r2,c2);
+    if(t2==='#' || t2==='$' || t2==='*') return; // blocked
+    saveHistory(); // snapshot before change
+
+    // move box forward
+    setCell(r2,c2, (t2==='.' ? '*' : '$'));
+    // clear current t1 (box spot becomes floor/goal)
+    setCell(r1,c1, (t1==='*' ? '.' : ' '));
+    // move player into r1
+    stepInto(r1,c1);
+    state.moves++;
+  } else { // empty/goal
+    if(t1===' ' || t1==='.'){
+      saveHistory();
+      stepInto(r1,c1);
+      state.moves++;
+    }
+  }
+  maybeWin();
+  render();
+}
+
+function stepInto(r,c){
+  const cur = getCell(state.player.r, state.player.c);
+  // leave behind floor or goal
+  setCell(state.player.r, state.player.c, (cur==='+' ? '.' : ' '));
+  // step onto new cell
+  const target = getCell(r,c);
+  setCell(r,c, (target==='.' ? '+' : '@'));
+  state.player = {r,c};
+}
+
+function isSolved(){
+  for(let r=0;r<state.height;r++){
+    for(let c=0;c<state.width;c++){
+      if(state.grid[r][c]==='.' ) return false; // any goal without box
+    }
+  }
+  return true;
+}
+
+function maybeWin(){
+  if(isSolved()){
+    setTimeout(()=>{
+      alert(`🎉 Hoàn thành màn ${levelIndex+1} sau ${state.moves} bước!`);
+      loadLevel((levelIndex+1)%LEVELS.length);
+    }, 30);
+  }
+}
+
+// Undo support
+function saveHistory(){
+  const snapshot = {
+    grid: state.grid.map(row=>row.slice()),
+    player: {...state.player},
+    moves: state.moves
+  };
+  state.history.push(snapshot);
+  if(state.history.length>200) state.history.shift();
+}
+function undo(){
+  const snap = state.history.pop();
+  if(!snap) return;
+  state.grid = snap.grid.map(row=>row.slice());
+  state.player = {...snap.player};
+  state.moves = snap.moves;
+  render();
+}
+
+// Load level
+function loadLevel(idx){
+  levelIndex = idx;
+  levelSelect.value = idx;
+  const parsed = parseLevel(LEVELS[idx]);
+  state = {
+    grid: parsed.grid,
+    width: parsed.width,
+    height: parsed.height,
+    player: findPlayerIn(parsed.grid),
+    moves: 0,
+    history: []
+  };
+  render();
+}
+
+function findPlayerIn(grid){
+  for(let r=0;r<grid.length;r++){
+    for(let c=0;c<grid[0].length;c++){
+      const ch = grid[r][c];
+      if(ch==='@'||ch==='+') return {r,c};
+    }
+  }
+  return {r:0,c:0};
+}
+
+// Keyboard input
+window.addEventListener('keydown', (e)=>{
+  const k = e.key.toLowerCase();
+  const map = {
+    arrowup:[-1,0], w:[-1,0],
+    arrowdown:[1,0], s:[1,0],
+    arrowleft:[0,-1], a:[0,-1],
+    arrowright:[0,1], d:[0,1]
+  };
+  if(map[k]){ e.preventDefault(); move(...map[k]); }
+  else if(k==='r'){ e.preventDefault(); loadLevel(levelIndex); }
+  else if(k==='z' || k==='u'){ e.preventDefault(); undo(); }
+});
+
+// Start
+loadLevel(0);
+</script>
+</body>
+</html>
